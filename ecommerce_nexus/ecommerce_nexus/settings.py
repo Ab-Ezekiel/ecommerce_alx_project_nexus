@@ -55,7 +55,7 @@ INSTALLED_APPS = [
     "django.contrib.postgres",
     "accounts",  
     "rest_framework_simplejwt.token_blacklist",  # <- required for logout/blacklist
-   
+    "idempotency_key",
 ]
 
 MIDDLEWARE = [
@@ -92,17 +92,32 @@ WSGI_APPLICATION = "ecommerce_nexus.wsgi.application"
 # Database
 # https://docs.djangoproject.com/en/4.2/ref/settings/#databases
 
-DATABASES = {
-    "default": {
-        "ENGINE": "django.db.backends.postgresql",
-        "NAME": env("POSTGRES_DB", default="ecommerce_db"),
-        "USER": env("POSTGRES_USER", default="ecommerce_user"),
-        "PASSWORD": env("POSTGRES_PASSWORD", default="strongpassword"),
-        "HOST": env("POSTGRES_HOST", default="localhost"),
-        "PORT": env("POSTGRES_PORT", default="5432"),
-    }
-}
+# ---------- Development-friendly DB / Cache / Celery config ----------
+# Use environment toggles so you can switch to Postgres/Redis for production.
+# Default: quick local dev using SQLite + in-memory cache + eager Celery.
 
+USE_POSTGRES = env.bool("USE_POSTGRES", default=False)
+
+if USE_POSTGRES:
+    # Postgres settings (when you want to use Postgres)
+    DATABASES = {
+        "default": {
+            "ENGINE": "django.db.backends.postgresql",
+            "NAME": env("POSTGRES_DB", default="ecommerce_db"),
+            "USER": env("POSTGRES_USER", default="ecommerce_user"),
+            "PASSWORD": env("POSTGRES_PASSWORD", default="strongpassword"),
+            "HOST": env("POSTGRES_HOST", default="127.0.0.1"),
+            "PORT": env("POSTGRES_PORT", default="5432"),
+        }
+    }
+else:
+    # Fast local default: SQLite (no external DB required)
+    DATABASES = {
+        "default": {
+            "ENGINE": "django.db.backends.sqlite3",
+            "NAME": BASE_DIR / "db.sqlite3",
+        }
+    }
 
 # Password validation
 # https://docs.djangoproject.com/en/4.2/ref/settings/#auth-password-validators
@@ -151,20 +166,27 @@ SIMPLE_JWT = {
 
 # Caching Configuration
 # https://docs.djangoproject.com/en/4.2/topics/cache/
-# read with safe defaults and proper casting
-REDIS_HOST = env("REDIS_HOST", default="redis")
-REDIS_PORT = env.int("REDIS_PORT", default=6379)
 
-CACHES = {
-    "default": {
-        "BACKEND": "django_redis.cache.RedisCache",
-        "LOCATION": f"redis://{REDIS_HOST}:{REDIS_PORT}/1",
-        "OPTIONS": {"CLIENT_CLASS": "django_redis.client.DefaultClient"},
+# Cache config: use Redis only if explicitly enabled
+USE_REDIS = env.bool("USE_REDIS", default=False)
+if USE_REDIS and USE_POSTGRES:
+    REDIS_HOST = env("REDIS_HOST", default="127.0.0.1")
+    REDIS_PORT = env.int("REDIS_PORT", default=6379)
+    CACHES = {
+        "default": {
+            "BACKEND": "django_redis.cache.RedisCache",
+            "LOCATION": f"redis://{REDIS_HOST}:{REDIS_PORT}/1",
+            "OPTIONS": {"CLIENT_CLASS": "django_redis.client.DefaultClient"},
+        }
     }
-}
-
-
-
+else:
+    # Simple in-memory cache for local dev
+    CACHES = {
+        "default": {
+            "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+            "LOCATION": "unique-dev-cache",
+        }
+    }
 # Internationalization
 # https://docs.djangoproject.com/en/4.2/topics/i18n/
 
@@ -189,3 +211,26 @@ MEDIA_ROOT = BASE_DIR / "media"
 # https://docs.djangoproject.com/en/4.2/ref/settings/#default-auto-field
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
+
+
+# Celery (development mode: tasks run synchronously so no broker required)
+# In production or when USE_POSTGRES & USE_REDIS are true you can change these envs.
+CELERY_ALWAYS_EAGER = env.bool("CELERY_ALWAYS_EAGER", default=True)
+CELERY_TASK_ALWAYS_EAGER = CELERY_ALWAYS_EAGER  # Celery older/newer keys
+CELERY_TASK_EAGER_PROPAGATES = env.bool("CELERY_TASK_EAGER_PROPAGATES", default=True)
+
+if not CELERY_ALWAYS_EAGER and USE_REDIS:
+    # broker url only used when not running eager mode
+    CELERY_BROKER_URL = env("CELERY_BROKER_URL", default=f"redis://{env('REDIS_HOST','127.0.0.1')}:{env.int('REDIS_PORT',6379)}/0")
+else:
+    CELERY_BROKER_URL = "memory://"
+# Optional: results backend when not eager
+if not CELERY_ALWAYS_EAGER and USE_REDIS:
+    CELERY_RESULT_BACKEND = CELERY_BROKER_URL
+else:
+    CELERY_RESULT_BACKEND = "django-db"  # safe default; requires django-celery-results if you want DB results
+# -------------------------------------------------------------------
+
+# Email
+EMAIL_BACKEND = "django.core.mail.backends.console.EmailBackend"
+DEFAULT_FROM_EMAIL = "noreply@example.com"

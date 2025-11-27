@@ -9,6 +9,14 @@ from .serializers import CategorySerializer, ProductSerializer
 from .filters import ProductFilter
 from drf_yasg import openapi
 
+from rest_framework import status
+from rest_framework.decorators import action
+from rest_framework.response import Response
+from .serializers import OrderSerializer
+from .models import Order
+from rest_framework.permissions import IsAuthenticated
+from idempotency_key.decorators import idempotency_key
+
 class StandardResultsSetPagination(LimitOffsetPagination):
     default_limit = 20
     max_limit = 100
@@ -58,3 +66,30 @@ class ProductViewSet(viewsets.ModelViewSet):
     )
     def create(self, request, *args, **kwargs):
         return super().create(request, *args, **kwargs)
+
+
+class OrderViewSet(viewsets.ModelViewSet):
+    queryset = Order.objects.all().select_related("user").prefetch_related("items__product")
+    serializer_class = OrderSerializer
+    permission_classes = [IsAuthenticated]
+    
+    @idempotency_key()
+    def create(self, request, *args, **kwargs):
+        return super().create(request, *args, **kwargs)
+
+    def get_queryset(self):
+        user = self.request.user
+        if user.is_staff:
+            return super().get_queryset()
+        return self.queryset.filter(user=user)
+        
+    def perform_create(self, serializer):
+        order = serializer.save(user=self.request.user)
+        order._changed_by = self.request.user.username
+        order.save()
+
+    def perform_update(self, serializer):
+        order = serializer.save()
+        order._changed_by = self.request.user.username
+        order.save()
+
