@@ -1,0 +1,78 @@
+services:
+  - type: web
+    name: ecommerce-backend
+    env: python
+    region: oregon
+    plan: free
+    branch: main
+    buildCommand: |
+      pip install --upgrade pip
+      pip install -r requirements.txt
+    startCommand: >
+      python ecommerce_nexus/manage.py migrate &&
+      python ecommerce_nexus/manage.py collectstatic --noinput &&
+      gunicorn ecommerce_nexus.wsgi:application --bind 0.0.0.0:10000
+    envVars:
+      - key: SECRET_KEY
+        sync: false
+      - key: DEBUG
+        value: "False"
+      - key: ALLOWED_HOSTS
+        value: "0.0.0.0,localhost,render.com,onrender.com"
+      - key: POSTGRES_HOST
+        fromService:
+          name: ecommerce-db
+          type: pserv
+      - key: POSTGRES_PASSWORD
+        fromService:
+          name: ecommerce-db
+          type: pserv
+      - key: POSTGRES_DB
+        value: ecommerce_db
+      - key: POSTGRES_USER
+        value: ecommerce_user
+      - key: REDIS_URL
+        fromService:
+          name: ecommerce-redis
+          type: redis
+  - type: worker
+    name: ecommerce-worker
+    env: python
+    region: oregon
+    plan: free
+    branch: main
+    buildCommand: |
+      pip install --upgrade pip
+      pip install -r requirements.txt
+    startCommand: celery -A ecommerce_nexus worker --loglevel=info
+    envVars:
+      - key: SECRET_KEY
+        sync: false
+      - key: POSTGRES_HOST
+        fromService:
+          name: ecommerce-db
+          type: pserv
+      - key: POSTGRES_PASSWORD
+        fromService:
+          name: ecommerce-db
+          type: pserv
+      - key: POSTGRES_DB
+        value: ecommerce_db
+      - key: POSTGRES_USER
+        value: ecommerce_user
+      - key: REDIS_URL
+        fromService:
+          name: ecommerce-redis
+          type: redis
+
+databases:
+  - name: ecommerce-db
+    region: oregon
+    plan: free
+    databaseName: ecommerce_db
+    user: ecommerce_user
+
+redis:
+  - name: ecommerce-redis
+    region: oregon
+    plan: free
