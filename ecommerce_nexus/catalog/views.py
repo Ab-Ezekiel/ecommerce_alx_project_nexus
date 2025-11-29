@@ -81,6 +81,14 @@ class OrderViewSet(viewsets.ModelViewSet):
         user = self.request.user
         if user.is_staff:
             return super().get_queryset()
+        
+        # Fix for Swagger/Redoc schema generation
+        if getattr(self, 'swagger_fake_view', False):
+            return self.queryset.none()
+
+        if user.is_anonymous:
+            return self.queryset.none()
+        
         return self.queryset.filter(user=user)
         
     def perform_create(self, serializer):
