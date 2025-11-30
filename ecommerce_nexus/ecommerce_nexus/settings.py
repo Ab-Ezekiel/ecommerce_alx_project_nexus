@@ -13,6 +13,8 @@ import os
 import environ
 from pathlib import Path
 from datetime import timedelta
+import dj_database_url
+
 
 
 # Initialize environment variables
@@ -36,7 +38,7 @@ SECRET_KEY = env("SECRET_KEY")
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = env("DEBUG", default=False)
 
-ALLOWED_HOSTS = env.list("ALLOWED_HOSTS", default=["*"])
+ALLOWED_HOSTS = env.list("ALLOWED_HOSTS", default=["*"])  # change "*" in prod
 
 
 # Application definition
@@ -99,8 +101,20 @@ WSGI_APPLICATION = "ecommerce_nexus.wsgi.application"
 
 USE_POSTGRES = env.bool("USE_POSTGRES", default=False)
 
-if USE_POSTGRES:
-    # Postgres settings (when you want to use Postgres)
+# --- 1. If using DATABASE_URL from Railway/Render, ALWAYS use it ---
+DATABASE_URL = env("DATABASE_URL", default=None)
+
+if DATABASE_URL:
+    DATABASES = {
+        "default": dj_database_url.parse(
+            DATABASE_URL,
+            conn_max_age=600,
+            ssl_require=False,
+        )
+    }
+
+# --- 2. If no DATABASE_URL but USE_POSTGRES=True ---
+elif USE_POSTGRES:
     DATABASES = {
         "default": {
             "ENGINE": "django.db.backends.postgresql",
@@ -111,8 +125,9 @@ if USE_POSTGRES:
             "PORT": env("POSTGRES_PORT", default="5432"),
         }
     }
+
+# --- 3. Final fallback: SQLite ---
 else:
-    # Fast local default: SQLite (no external DB required)
     DATABASES = {
         "default": {
             "ENGINE": "django.db.backends.sqlite3",
@@ -213,8 +228,10 @@ MEDIA_URL = "/media/"
 MEDIA_ROOT = BASE_DIR / "media"
 
 
-STATIC_ROOT = BASE_DIR / "staticfiles"
+# --- Static files (for production) ---
 STATIC_URL = "/static/"
+STATIC_ROOT = BASE_DIR / "staticfiles"
+# Optional: compressed manifest storage (recommended)
 STATICFILES_STORAGE = "whitenoise.storage.CompressedManifestStaticFilesStorage"
 
 
